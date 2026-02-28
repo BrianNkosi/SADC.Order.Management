@@ -1,0 +1,6 @@
+@SADC.Order.Management_HostAddress = http://localhost:5120
+
+GET {{SADC.Order.Management_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
