@@ -1,0 +1,68 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from './client';
+import type {
+  OrderDto,
+  OrderSummaryDto,
+  CreateOrderRequest,
+  UpdateOrderStatusRequest,
+  PaginatedList,
+  OrderStatus,
+} from '../types';
+
+export function useOrders(
+  customerId?: string,
+  status?: OrderStatus,
+  page: number = 1,
+  pageSize: number = 20,
+  sortBy?: string,
+  descending: boolean = false,
+) {
+  return useQuery({
+    queryKey: ['orders', customerId, status, page, pageSize, sortBy, descending],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (customerId) params.set('customerId', customerId);
+      if (status) params.set('status', status);
+      params.set('page', page.toString());
+      params.set('pageSize', pageSize.toString());
+      if (sortBy) params.set('sortBy', sortBy);
+      if (descending) params.set('descending', 'true');
+      return api.get<PaginatedList<OrderSummaryDto>>(`/orders?${params}`);
+    },
+  });
+}
+
+export function useOrder(id: string) {
+  return useQuery({
+    queryKey: ['orders', id],
+    queryFn: () => api.get<OrderDto>(`/orders/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useCreateOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateOrderRequest) =>
+      api.post<OrderDto>('/orders', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
+export function useUpdateOrderStatus(orderId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: UpdateOrderStatusRequest) => {
+      const headers: Record<string, string> = {};
+      if (data.idempotencyKey) {
+        headers['Idempotency-Key'] = data.idempotencyKey;
+      }
+      return api.put<OrderDto>(`/orders/${orderId}/status`, data, headers);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
