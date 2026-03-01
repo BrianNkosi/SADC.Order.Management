@@ -71,6 +71,8 @@ public class OrderService : IOrderService
         var outboxMessage = new OutboxMessage
         {
             Id = Guid.NewGuid(),
+            AggregateType = "Order",
+            AggregateId = order.Id,
             Type = "OrderCreated",
             Payload = JsonSerializer.Serialize(new
             {
@@ -88,7 +90,9 @@ public class OrderService : IOrderService
                     li.UnitPrice
                 })
             }),
-            CreatedAtUtc = DateTime.UtcNow
+            OccurredAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow,
+            Version = 1
         };
 
         _context.Orders.Add(order);
@@ -151,6 +155,17 @@ public class OrderService : IOrderService
     public async Task<OrderDto> UpdateStatusAsync(
         Guid id, UpdateOrderStatusRequest request, CancellationToken cancellationToken = default)
     {
+        // Idempotency-Key deduplication: return cached response if key was already processed
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var existing = await _context.IdempotencyRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Key == request.IdempotencyKey, cancellationToken);
+
+            if (existing is not null)
+                return JsonSerializer.Deserialize<OrderDto>(existing.ResponsePayload)!;
+        }
+
         var order = await _context.Orders
             .Include(o => o.Customer)
             .Include(o => o.LineItems)
@@ -168,8 +183,22 @@ public class OrderService : IOrderService
                 $"Allowed transitions: {string.Join(", ", order.Status.AllowedTransitions())}.");
         }
 
+        var result = _mapper.Map<OrderDto>(order);
+
+        // Store idempotency record atomically with the status change
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            _context.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = Guid.NewGuid(),
+                Key = request.IdempotencyKey,
+                ResponsePayload = JsonSerializer.Serialize(result),
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
 
-        return _mapper.Map<OrderDto>(order);
+        return result;
     }
 }

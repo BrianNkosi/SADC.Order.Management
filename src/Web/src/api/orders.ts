@@ -45,7 +45,12 @@ export function useCreateOrder() {
   return useMutation({
     mutationFn: (data: CreateOrderRequest) =>
       api.post<OrderDto>('/orders', data),
-    onSuccess: () => {
+    onMutate: async () => {
+      // Cancel outgoing list refetches to avoid overwriting optimistic state
+      await queryClient.cancelQueries({ queryKey: ['orders'] });
+    },
+    onSettled: () => {
+      // Always refetch orders list after mutation completes (success or error)
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
@@ -61,7 +66,32 @@ export function useUpdateOrderStatus(orderId: string) {
       }
       return api.put<OrderDto>(`/orders/${orderId}/status`, data, headers);
     },
-    onSuccess: () => {
+    onMutate: async (data) => {
+      // Cancel any outgoing refetches so they don't overwrite our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['orders', orderId] });
+
+      // Snapshot the previous value
+      const previousOrder = queryClient.getQueryData<OrderDto>(['orders', orderId]);
+
+      // Optimistically update the cache
+      if (previousOrder) {
+        queryClient.setQueryData<OrderDto>(['orders', orderId], {
+          ...previousOrder,
+          status: data.newStatus,
+          updatedAtUtc: new Date().toISOString(),
+        });
+      }
+
+      return { previousOrder };
+    },
+    onError: (_err, _data, context) => {
+      // Roll back to the previous value on error
+      if (context?.previousOrder) {
+        queryClient.setQueryData(['orders', orderId], context.previousOrder);
+      }
+    },
+    onSettled: () => {
+      // Refetch to ensure server state is in sync
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });

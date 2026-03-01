@@ -13,6 +13,10 @@ using SADC.Order.Management.Infrastructure.Persistence;
 using Serilog;
 using System.Text.Json.Serialization;
 
+// Create a fresh bootstrap logger each time the entry point is invoked.
+// This is necessary for WebApplicationFactory integration tests, which
+// may re-invoke Main() — creating a new ReloadableLogger avoids the
+// "logger is already frozen" error.
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
@@ -24,13 +28,14 @@ try
     // Aspire service defaults — OpenTelemetry, health checks, resilience, service discovery
     builder.AddServiceDefaults();
 
-    // Serilog
+    // Serilog — use writeToProviders to integrate with test host logging
     builder.Host.UseSerilog((context, services, configuration) => configuration
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
         .Enrich.FromLogContext()
         .WriteTo.Console(outputTemplate:
-            "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}"));
+            "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}"),
+        writeToProviders: true);
 
     // Microsoft Entra ID (Azure AD) JWT authentication
     if (builder.Environment.IsDevelopment() &&

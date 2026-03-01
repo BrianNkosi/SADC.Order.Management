@@ -10,25 +10,14 @@ using Xunit;
 
 namespace SADC.Order.Management.Tests.Integration;
 
-public class CustomersApiTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection("Integration")]
+public class CustomersApiTests
 {
     private readonly HttpClient _client;
 
-    public CustomersApiTests(WebApplicationFactory<Program> factory)
+    public CustomersApiTests(TestWebApplicationFactory factory)
     {
-        _client = factory.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureServices(services =>
-            {
-                // Replace SQL Server with in-memory for tests
-                var descriptor = services.SingleOrDefault(
-                    d => d.ServiceType == typeof(DbContextOptions<OrderManagementDbContext>));
-                if (descriptor != null) services.Remove(descriptor);
-
-                services.AddDbContext<OrderManagementDbContext>(options =>
-                    options.UseInMemoryDatabase("TestDb_" + Guid.NewGuid()));
-            });
-        }).CreateClient();
+        _client = factory.CreateClient();
     }
 
     [Fact]

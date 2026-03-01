@@ -16,6 +16,7 @@ public class OrderManagementDbContext : DbContext, IOrderManagementDbContext
     public DbSet<OrderEntity> Orders => Set<OrderEntity>();
     public DbSet<OrderLineItem> OrderLineItems => Set<OrderLineItem>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

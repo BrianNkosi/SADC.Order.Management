@@ -21,6 +21,7 @@ public class OutboxPublisherService : BackgroundService
     private const string Exchange = "orders";
     private const int PollingIntervalMs = 2000;
     private const int MaxRetries = 5;
+    private const int BaseBackoffSeconds = 2;
 
     public OutboxPublisherService(
         IServiceScopeFactory scopeFactory,
@@ -56,13 +57,23 @@ public class OutboxPublisherService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<OrderManagementDbContext>();
 
+        var now = DateTime.UtcNow;
+
         var messages = await context.OutboxMessages
             .Where(m => m.ProcessedAtUtc == null && m.RetryCount < MaxRetries)
             .OrderBy(m => m.CreatedAtUtc)
             .Take(20)
             .ToListAsync(cancellationToken);
 
-        foreach (var message in messages)
+        // Apply exponential backoff: skip messages whose backoff period hasn't elapsed
+        var eligibleMessages = messages.Where(m =>
+        {
+            if (m.RetryCount == 0) return true;
+            var backoffDelay = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, m.RetryCount - 1));
+            return now >= m.CreatedAtUtc.Add(backoffDelay * m.RetryCount);
+        }).ToList();
+
+        foreach (var message in eligibleMessages)
         {
             try
             {
@@ -71,7 +82,17 @@ public class OutboxPublisherService : BackgroundService
                 await _publisher.PublishAsync(
                     Exchange,
                     routingKey,
-                    new { message.Id, message.Type, message.Payload, message.CreatedAtUtc },
+                    new
+                    {
+                        message.Id,
+                        message.AggregateType,
+                        message.AggregateId,
+                        message.Type,
+                        message.Payload,
+                        message.Version,
+                        message.OccurredAtUtc,
+                        message.CreatedAtUtc
+                    },
                     cancellationToken);
 
                 message.ProcessedAtUtc = DateTime.UtcNow;
@@ -84,12 +105,11 @@ public class OutboxPublisherService : BackgroundService
                 message.RetryCount++;
                 message.Error = ex.Message;
 
+                var nextBackoff = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, message.RetryCount - 1));
                 _logger.LogWarning(ex,
-                    "Failed to publish outbox message {MessageId} (attempt {Attempt}/{MaxRetries})",
-                    message.Id, message.RetryCount, MaxRetries);
-
-                // Exponential backoff: skip this message for increasingly longer periods
-                // by not marking it as processed; the polling interval handles basic backoff
+                    "Failed to publish outbox message {MessageId} (attempt {Attempt}/{MaxRetries}). " +
+                    "Next retry in {BackoffSeconds}s",
+                    message.Id, message.RetryCount, MaxRetries, nextBackoff.TotalSeconds);
             }
         }
 

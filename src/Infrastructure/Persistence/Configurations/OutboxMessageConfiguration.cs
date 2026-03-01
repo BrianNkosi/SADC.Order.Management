@@ -13,6 +13,14 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         builder.HasKey(m => m.Id);
         builder.Property(m => m.Id).ValueGeneratedNever();
 
+        builder.Property(m => m.AggregateType)
+            .IsRequired()
+            .HasMaxLength(100)
+            .HasDefaultValue("Order");
+
+        builder.Property(m => m.AggregateId)
+            .IsRequired();
+
         builder.Property(m => m.Type)
             .IsRequired()
             .HasMaxLength(200);
@@ -20,8 +28,15 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         builder.Property(m => m.Payload)
             .IsRequired();
 
+        builder.Property(m => m.OccurredAtUtc)
+            .IsRequired();
+
         builder.Property(m => m.CreatedAtUtc)
             .IsRequired();
+
+        builder.Property(m => m.Version)
+            .IsRequired()
+            .HasDefaultValue(1);
 
         builder.Property(m => m.Error)
             .HasMaxLength(2000);
@@ -30,5 +45,9 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         builder.HasIndex(m => m.ProcessedAtUtc)
             .HasDatabaseName("IX_OutboxMessages_ProcessedAtUtc")
             .HasFilter("[ProcessedAtUtc] IS NULL");
+
+        // Index for consumer deduplication by aggregate
+        builder.HasIndex(m => new { m.AggregateType, m.AggregateId })
+            .HasDatabaseName("IX_OutboxMessages_AggregateType_AggregateId");
     }
 }

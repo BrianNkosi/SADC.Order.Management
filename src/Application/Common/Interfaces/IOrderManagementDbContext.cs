@@ -13,6 +13,7 @@ public interface IOrderManagementDbContext
     DbSet<OrderEntity> Orders { get; }
     DbSet<OrderLineItem> OrderLineItems { get; }
     DbSet<OutboxMessage> OutboxMessages { get; }
+    DbSet<IdempotencyRecord> IdempotencyRecords { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

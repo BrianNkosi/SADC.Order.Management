@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SADC.Order.Management.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using SADC.Order.Management.Infrastructure.Persistence;
 namespace SADC.Order.Management.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(OrderManagementDbContext))]
-    partial class OrderManagementDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260301173439_AddOutboxAggregateFields")]
+    partial class AddOutboxAggregateFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -59,33 +62,6 @@ namespace SADC.Order.Management.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("IX_Customers_Email");
 
                     b.ToTable("Customers", (string)null);
-                });
-
-            modelBuilder.Entity("SADC.Order.Management.Domain.Entities.IdempotencyRecord", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ResponsePayload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique()
-                        .HasDatabaseName("IX_IdempotencyRecords_Key");
-
-                    b.ToTable("IdempotencyRecords", (string)null);
                 });
 
             modelBuilder.Entity("SADC.Order.Management.Domain.Entities.Order", b =>
