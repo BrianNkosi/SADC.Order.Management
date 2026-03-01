@@ -11,6 +11,7 @@ using SADC.Order.Management.Application;
 using SADC.Order.Management.Infrastructure;
 using SADC.Order.Management.Infrastructure.Persistence;
 using Serilog;
+using System.Text.Json.Serialization;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -69,7 +70,11 @@ try
         .AddDbContextCheck<OrderManagementDbContext>("database");
 
     // Controllers
-    builder.Services.AddControllers();
+    builder.Services.AddControllers()
+        .AddJsonOptions(options =>
+        {
+            options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+        });
 
     // OpenAPI / Swagger
     builder.Services.AddEndpointsApiExplorer();
