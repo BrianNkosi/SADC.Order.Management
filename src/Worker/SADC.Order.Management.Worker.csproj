@@ -9,14 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Application\SADC.Order.Management.Application.csproj" />
     <ProjectReference Include="..\Infrastructure\SADC.Order.Management.Infrastructure.csproj" />
+    <ProjectReference Include="..\ServiceDefaults\SADC.Order.Management.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

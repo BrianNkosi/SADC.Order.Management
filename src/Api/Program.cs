@@ -5,14 +5,10 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
 using Microsoft.OpenApi.Models;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using SADC.Order.Management.Api;
 using SADC.Order.Management.Api.Middleware;
 using SADC.Order.Management.Application;
 using SADC.Order.Management.Infrastructure;
-using SADC.Order.Management.Infrastructure.Diagnostics;
 using SADC.Order.Management.Infrastructure.Persistence;
 using Serilog;
 
@@ -23,6 +19,9 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
+
+    // Aspire service defaults — OpenTelemetry, health checks, resilience, service discovery
+    builder.AddServiceDefaults();
 
     // Serilog
     builder.Host.UseSerilog((context, services, configuration) => configuration
@@ -65,19 +64,9 @@ try
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
 
-    // OpenTelemetry — Tracing & Metrics
-    builder.Services.AddOpenTelemetry()
-        .ConfigureResource(resource => resource.AddService(TelemetryConstants.ServiceName))
-        .WithTracing(tracing => tracing
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddSource(TelemetryConstants.ServiceName)
-            .AddConsoleExporter())
-        .WithMetrics(metrics => metrics
-            .AddAspNetCoreInstrumentation()
-            .AddHttpClientInstrumentation()
-            .AddMeter(TelemetryConstants.ServiceName)
-            .AddConsoleExporter());
+    // Additional health check — EF Core database connectivity
+    builder.Services.AddHealthChecks()
+        .AddDbContextCheck<OrderManagementDbContext>("database");
 
     // Controllers
     builder.Services.AddControllers();
@@ -132,10 +121,6 @@ try
         });
     });
 
-    // Health checks
-    builder.Services.AddHealthChecks()
-        .AddDbContextCheck<OrderManagementDbContext>("database");
-
     // CORS for React frontend
     builder.Services.AddCors(options =>
     {
@@ -150,6 +135,9 @@ try
     });
 
     var app = builder.Build();
+
+    // Aspire default endpoints — health checks at /health and /alive
+    app.MapDefaultEndpoints();
 
     // Configure the HTTP request pipeline
     app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -173,9 +161,10 @@ try
         await next();
     });
 
-    app.UseHttpsRedirection();
+    // In development, Vite's proxy handles HTTPS — redirect only in production
     if (!app.Environment.IsDevelopment())
     {
+        app.UseHttpsRedirection();
         app.UseHsts();
     }
     app.UseCors("AllowFrontend");
@@ -185,15 +174,20 @@ try
     app.UseAuthorization();
 
     app.MapControllers().RequireRateLimiting("fixed");
-    app.MapHealthChecks("/healthz").AllowAnonymous();
-    app.MapHealthChecks("/readiness").AllowAnonymous();
 
-    // Apply migrations in development
+    // Apply migrations in development (skipped for in-memory test databases)
     if (app.Environment.IsDevelopment())
     {
-        using var scope = app.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<OrderManagementDbContext>();
-        await db.Database.MigrateAsync();
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<OrderManagementDbContext>();
+            await db.Database.MigrateAsync();
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Relational"))
+        {
+            Log.Warning("Skipping migrations — non-relational database provider in use");
+        }
     }
 
     app.Run();

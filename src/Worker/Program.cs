@@ -1,8 +1,4 @@
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using SADC.Order.Management.Infrastructure;
-using SADC.Order.Management.Infrastructure.Diagnostics;
 using SADC.Order.Management.Worker;
 using Serilog;
 
@@ -14,6 +10,9 @@ try
 {
     var builder = Host.CreateApplicationBuilder(args);
 
+    // Aspire service defaults — OpenTelemetry, health checks, resilience, service discovery
+    builder.AddServiceDefaults();
+
     builder.Services.AddSerilog((services, configuration) => configuration
         .ReadFrom.Configuration(builder.Configuration)
         .ReadFrom.Services(services)
@@ -22,16 +21,6 @@ try
             "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}"));
 
     builder.Services.AddInfrastructure(builder.Configuration);
-
-    // OpenTelemetry — Tracing & Metrics
-    builder.Services.AddOpenTelemetry()
-        .ConfigureResource(resource => resource.AddService($"{TelemetryConstants.ServiceName}.Worker"))
-        .WithTracing(tracing => tracing
-            .AddSource(TelemetryConstants.ServiceName)
-            .AddConsoleExporter())
-        .WithMetrics(metrics => metrics
-            .AddMeter(TelemetryConstants.ServiceName)
-            .AddConsoleExporter());
 
     builder.Services.AddHostedService<OrderConsumerWorker>();
 

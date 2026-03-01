@@ -6,15 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SADC.Order.Management.Api</RootNamespace>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <UserSecretsId>4d353647-1830-49b7-97f6-3c1292cafbed</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.2" />
     <PackageReference Include="Microsoft.Identity.Web" Version="3.8.3" />
-    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.15.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="AspNetCoreRateLimit" Version="5.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="9.0.2" />
@@ -29,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Application\SADC.Order.Management.Application.csproj" />
     <ProjectReference Include="..\Infrastructure\SADC.Order.Management.Infrastructure.csproj" />
+    <ProjectReference Include="..\ServiceDefaults\SADC.Order.Management.ServiceDefaults.csproj" />
   </ItemGroup>
 
 </Project>

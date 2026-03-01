@@ -23,12 +23,36 @@ public static class DependencyInjection
         services.AddScoped<IOrderManagementDbContext>(sp =>
             sp.GetRequiredService<OrderManagementDbContext>());
 
-        // RabbitMQ — test connectivity and fall back to NullMessagePublisher
+        // RabbitMQ — supports both Aspire connection string (amqp:// URI) and individual settings
         var rabbitSection = configuration.GetSection(RabbitMqSettings.SectionName);
         services.Configure<RabbitMqSettings>(rabbitSection);
 
-        if (IsRabbitMqReachable(rabbitSection))
+        // Aspire injects RabbitMQ via ConnectionStrings:messaging
+        var rabbitConnectionString = configuration.GetConnectionString("messaging");
+
+        if (!string.IsNullOrEmpty(rabbitConnectionString) || IsRabbitMqReachable(rabbitSection, rabbitConnectionString))
         {
+            if (!string.IsNullOrEmpty(rabbitConnectionString))
+            {
+                // Override RabbitMqSettings from the Aspire connection string
+                services.PostConfigure<RabbitMqSettings>(settings =>
+                {
+                    var uri = new Uri(rabbitConnectionString);
+                    settings.HostName = uri.Host;
+                    settings.Port = uri.Port > 0 ? uri.Port : 5672;
+                    if (!string.IsNullOrEmpty(uri.UserInfo))
+                    {
+                        var parts = uri.UserInfo.Split(':');
+                        settings.UserName = Uri.UnescapeDataString(parts[0]);
+                        settings.Password = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : "guest";
+                    }
+                    if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
+                    {
+                        settings.VirtualHost = Uri.UnescapeDataString(uri.AbsolutePath);
+                    }
+                });
+            }
+
             services.AddSingleton<IMessagePublisher, RabbitMqPublisher>();
             services.AddHostedService<OutboxPublisherService>();
         }
@@ -45,10 +69,29 @@ public static class DependencyInjection
         return services;
     }
 
-    private static bool IsRabbitMqReachable(IConfigurationSection section)
+    private static bool IsRabbitMqReachable(IConfigurationSection section, string? connectionString)
     {
-        var host = section["HostName"] ?? "localhost";
-        var port = int.TryParse(section["Port"], out var p) ? p : 5672;
+        string host;
+        int port;
+
+        if (!string.IsNullOrEmpty(connectionString))
+        {
+            try
+            {
+                var uri = new Uri(connectionString);
+                host = uri.Host;
+                port = uri.Port > 0 ? uri.Port : 5672;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        else
+        {
+            host = section["HostName"] ?? "localhost";
+            port = int.TryParse(section["Port"], out var p) ? p : 5672;
+        }
 
         try
         {

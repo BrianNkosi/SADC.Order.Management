@@ -18,7 +18,9 @@ A full-stack order management system for SADC (Southern African Development Comm
 | Logging | Serilog (structured, console sink) |
 | Testing | xUnit + FluentAssertions + NSubstitute + Testcontainers |
 | CI | GitHub Actions |
-| Containers | Docker + docker-compose |
+| Orchestration | .NET Aspire 9 (AppHost + ServiceDefaults) |
+| Containers | Podman (local dev via Aspire) / Docker (CI) |
+| Observability | OpenTelemetry (OTLP) via Aspire Dashboard |
 
 ## Architecture
 
@@ -31,7 +33,9 @@ src/
 ├── Infrastructure/   # EF Core, RabbitMQ, FX Provider, Caching
 ├── Api/              # ASP.NET Core Web API (controllers, middleware)
 ├── Worker/           # RabbitMQ consumer (BackgroundService)
-└── Web/              # React + TypeScript SPA
+├── Web/              # React + TypeScript SPA
+├── AppHost/          # .NET Aspire orchestrator (SQL Server, RabbitMQ, services)
+└── ServiceDefaults/  # Shared Aspire config (OpenTelemetry, health checks, resilience)
 tests/
 ├── Unit/             # xUnit unit tests (58 tests)
 └── Integration/      # Integration tests with WebApplicationFactory
@@ -43,44 +47,81 @@ tests/
 
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
 - [Node.js 22+](https://nodejs.org/)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [Podman Desktop](https://podman-desktop.io/) or [Podman CLI](https://podman.io/) (for local dev via Aspire)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (optional, for docker-compose / CI)
 
-### Quick Start (Docker Compose)
+### Quick Start (.NET Aspire + Podman) — Recommended
+
+.NET Aspire orchestrates all infrastructure (SQL Server, RabbitMQ) and application services (API, Worker, Web) with a single command. The Aspire Dashboard provides built-in observability (traces, metrics, logs).
 
 ```bash
-# 1. Clone the repository
+# 1. Clone and navigate
 git clone <repo-url>
 cd SADC.Order.Management
 
-# 2. Copy environment variables
-cp .env.example .env
-# Edit .env with your desired passwords
+# 2. Ensure Podman is running
+podman machine start   # on Windows/macOS
 
-# 3. Start all services
+# 3. Set Podman as the container runtime for Aspire
+$env:DOTNET_ASPIRE_CONTAINER_RUNTIME = "podman"   # PowerShell
+# export DOTNET_ASPIRE_CONTAINER_RUNTIME=podman    # bash/zsh
+
+# 4. Set the SQL Server password (Aspire user-secret)
+cd src/AppHost
+dotnet user-secrets set "Parameters:sql-password" "YourStrong@Passw0rd"
+cd ../..
+
+# 5. Start everything
+dotnet run --project src/AppHost
+
+# 6. Access the application
+# Aspire Dashboard: https://localhost:17180  (shown in terminal output)
+# API Swagger:      http://localhost:<port>/swagger  (port assigned by Aspire)
+# Frontend:         http://localhost:5173
+# RabbitMQ Mgmt:    http://localhost:<port> (port assigned by Aspire)
+```
+
+> **Note:** Aspire automatically manages SQL Server and RabbitMQ containers via Podman, applies EF Core migrations, and wires up OpenTelemetry with OTLP export to the Aspire Dashboard.
+
+### Alternative: Docker Compose
+
+Docker Compose is kept for CI pipelines and production-like deployments.
+
+```bash
+# 1. Copy environment variables
+cp .env.example .env
+
+# 2. Start all services
 docker-compose up -d
 
-# 4. Access the application
-# API Swagger: http://localhost:5000/swagger
-# Frontend:    http://localhost:3000
+# 3. Access the application
+# API Swagger: http://localhost:5120/swagger
+# Frontend:    http://localhost:5173
 # RabbitMQ:    http://localhost:15672 (guest/guest)
 ```
 
-### Local Development (Without Docker)
+### Local Development (Without Aspire)
+
+If you want to run services individually without Aspire orchestration:
 
 ```bash
+# Start infrastructure containers (Podman or Docker)
+podman run -d --name sadc-sqlserver -e ACCEPT_EULA=Y -e "SA_PASSWORD=YourStrong@Passw0rd" -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest
+podman run -d --name sadc-rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+
 # Backend
 dotnet restore SADC.Order.Management.sln
 dotnet build SADC.Order.Management.sln
 
-# Run API (requires SQL Server & RabbitMQ)
+# Run API
 cd src/Api
 dotnet run
 
-# Run Worker
+# Run Worker (separate terminal)
 cd src/Worker
 dotnet run
 
-# Frontend
+# Frontend (separate terminal)
 cd src/Web
 npm install
 npm run dev
@@ -148,8 +189,8 @@ dotnet ef database update <PreviousMigrationName> \
 | GET | `/api/orders?customerId=&status=&page=&pageSize=&sortBy=&descending=` | List orders | Orders.Read |
 | PUT | `/api/orders/{id}/status` | Update order status | Orders.Write |
 | GET | `/api/reports/orders/zar` | ZAR conversion report | Orders.Read |
-| GET | `/healthz` | Liveness check | Anonymous |
-| GET | `/readiness` | Readiness check | Anonymous |
+| GET | `/health` | Health check (all) | Anonymous |
+| GET | `/alive` | Liveness check | Anonymous |
 
 ## Key Design Decisions
 
@@ -182,6 +223,7 @@ dotnet ef database update <PreviousMigrationName> \
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `DOTNET_ASPIRE_CONTAINER_RUNTIME` | Container runtime for Aspire | `podman` |
 | `SA_PASSWORD` | SQL Server SA password | `YourStrong!Passw0rd` |
 | `RABBITMQ_DEFAULT_USER` | RabbitMQ username | `guest` |
 | `RABBITMQ_DEFAULT_PASS` | RabbitMQ password | `guest` |
