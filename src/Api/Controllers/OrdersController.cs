@@ -1,7 +1,9 @@
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SADC.Order.Management.Application.Orders;
+using SADC.Order.Management.Application.Orders.Commands;
 using SADC.Order.Management.Application.Orders.DTOs;
+using SADC.Order.Management.Application.Orders.Queries;
 using SADC.Order.Management.Domain.Enums;
 
 namespace SADC.Order.Management.Api.Controllers;
@@ -12,11 +14,11 @@ namespace SADC.Order.Management.Api.Controllers;
 [Authorize]
 public class OrdersController : ControllerBase
 {
-    private readonly IOrderService _orderService;
+    private readonly ISender _sender;
 
-    public OrdersController(IOrderService orderService)
+    public OrdersController(ISender sender)
     {
-        _orderService = orderService;
+        _sender = sender;
     }
 
     /// <summary>
@@ -37,7 +39,8 @@ public class OrdersController : ControllerBase
         [FromBody] CreateOrderRequest request,
         CancellationToken cancellationToken)
     {
-        var order = await _orderService.CreateAsync(request, cancellationToken);
+        var command = new CreateOrderCommand(request.CustomerId, request.CurrencyCode, request.LineItems);
+        var order = await _sender.Send(command, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
     }
 
@@ -55,7 +58,7 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var order = await _orderService.GetByIdAsync(id, cancellationToken);
+        var order = await _sender.Send(new GetOrderByIdQuery(id), cancellationToken);
         if (order is null)
             return NotFound();
 
@@ -92,8 +95,8 @@ public class OrdersController : ControllerBase
         [FromQuery] bool descending = false,
         CancellationToken cancellationToken = default)
     {
-        var result = await _orderService.ListAsync(
-            customerId, status, page, pageSize, sortBy, descending, cancellationToken);
+        var query = new ListOrdersQuery(customerId, status, page, pageSize, sortBy, descending);
+        var result = await _sender.Send(query, cancellationToken);
         return Ok(result);
     }
 
@@ -122,9 +125,8 @@ public class OrdersController : ControllerBase
     {
         // Support idempotency key from header
         var idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault();
-        var effectiveRequest = request with { IdempotencyKey = idempotencyKey ?? request.IdempotencyKey };
-
-        var order = await _orderService.UpdateStatusAsync(id, effectiveRequest, cancellationToken);
+        var command = new UpdateOrderStatusCommand(id, request.NewStatus, idempotencyKey ?? request.IdempotencyKey);
+        var order = await _sender.Send(command, cancellationToken);
         return Ok(order);
     }
 }

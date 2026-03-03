@@ -1,7 +1,9 @@
+using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using SADC.Order.Management.Application.Customers;
+using SADC.Order.Management.Application.Customers.Commands;
 using SADC.Order.Management.Application.Customers.DTOs;
+using SADC.Order.Management.Application.Customers.Queries;
 
 namespace SADC.Order.Management.Api.Controllers;
 
@@ -11,11 +13,11 @@ namespace SADC.Order.Management.Api.Controllers;
 [Authorize]
 public class CustomersController : ControllerBase
 {
-    private readonly ICustomerService _customerService;
+    private readonly ISender _sender;
 
-    public CustomersController(ICustomerService customerService)
+    public CustomersController(ISender sender)
     {
-        _customerService = customerService;
+        _sender = sender;
     }
 
     /// <summary>
@@ -33,7 +35,8 @@ public class CustomersController : ControllerBase
         [FromBody] CreateCustomerRequest request,
         CancellationToken cancellationToken)
     {
-        var customer = await _customerService.CreateAsync(request, cancellationToken);
+        var command = new CreateCustomerCommand(request.Name, request.Email, request.CountryCode);
+        var customer = await _sender.Send(command, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = customer.Id }, customer);
     }
 
@@ -50,7 +53,7 @@ public class CustomersController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CustomerDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var customer = await _customerService.GetByIdAsync(id, cancellationToken);
+        var customer = await _sender.Send(new GetCustomerByIdQuery(id), cancellationToken);
         if (customer is null)
             return NotFound();
 
@@ -73,7 +76,7 @@ public class CustomersController : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await _customerService.SearchAsync(search, page, pageSize, cancellationToken);
+        var result = await _sender.Send(new SearchCustomersQuery(search, page, pageSize), cancellationToken);
         return Ok(result);
     }
 }

@@ -1,5 +1,7 @@
 using FluentValidation;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
+using SADC.Order.Management.Application.Common.Behaviours;
 using SADC.Order.Management.Application.Customers;
 using SADC.Order.Management.Application.Mappings;
 using SADC.Order.Management.Application.Orders;
@@ -15,6 +17,15 @@ public static class DependencyInjection
 
         // FluentValidation — register all validators from this assembly
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+
+        // MediatR — auto-discover all handlers in this assembly + pipeline behaviours
+        services.AddMediatR(cfg =>
+        {
+            cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly);
+            cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionLoggingBehaviour<,>));
+            cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(RequestValidationBehaviour<,>));
+            cfg.AddBehavior(typeof(IPipelineBehavior<,>), typeof(LongRunningRequestLoggingBehaviour<,>));
+        });
 
         // Application services
         services.AddScoped<ICustomerService, CustomerService>();
