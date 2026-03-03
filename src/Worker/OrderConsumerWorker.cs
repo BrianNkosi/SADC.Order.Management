@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using Serilog.Context;
 using SADC.Order.Management.Domain.Enums;
 using SADC.Order.Management.Infrastructure.Messaging;
 using SADC.Order.Management.Infrastructure.Persistence;
@@ -90,7 +91,10 @@ public class OrderConsumerWorker : BackgroundService
                     var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(message.Payload);
                     if (orderEvent is not null)
                     {
-                        await ProcessOrderCreatedAsync(orderEvent, stoppingToken);
+                        using (LogContext.PushProperty("CorrelationId", orderEvent.CorrelationId ?? Guid.NewGuid().ToString()))
+                        {
+                            await ProcessOrderCreatedAsync(orderEvent, stoppingToken);
+                        }
                     }
                 }
 
@@ -171,5 +175,5 @@ public class OrderConsumerWorker : BackgroundService
 
     // DTOs for deserializing messages
     private record OutboxMessagePayload(Guid Id, string Type, string Payload, DateTime CreatedAtUtc);
-    private record OrderCreatedEvent(Guid OrderId, Guid CustomerId, string CurrencyCode, decimal TotalAmount);
+    private record OrderCreatedEvent(Guid OrderId, Guid CustomerId, string CurrencyCode, decimal TotalAmount, string? CorrelationId = null);
 }

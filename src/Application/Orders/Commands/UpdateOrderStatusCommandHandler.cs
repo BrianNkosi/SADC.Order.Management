@@ -1,17 +1,101 @@
+using System.Text.Json;
+using AutoMapper;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using SADC.Order.Management.Application.Common.Interfaces;
 using SADC.Order.Management.Application.Orders.DTOs;
+using SADC.Order.Management.Domain.Entities;
+using SADC.Order.Management.Domain.Enums;
 
 namespace SADC.Order.Management.Application.Orders.Commands;
 
-/// <summary>
-/// Handles UpdateOrderStatusCommand by delegating to IOrderService.
-/// </summary>
-public sealed class UpdateOrderStatusCommandHandler(IOrderService orderService)
+public sealed class UpdateOrderStatusCommandHandler(
+    IOrderManagementDbContext context,
+    IMapper mapper,
+    ILogger<UpdateOrderStatusCommandHandler> logger)
     : IRequestHandler<UpdateOrderStatusCommand, OrderDto>
 {
     public async Task<OrderDto> Handle(UpdateOrderStatusCommand request, CancellationToken cancellationToken)
     {
-        var statusRequest = new UpdateOrderStatusRequest(request.NewStatus, request.IdempotencyKey);
-        return await orderService.UpdateStatusAsync(request.OrderId, statusRequest, cancellationToken);
+        logger.LogInformation(
+            "Updating order status: OrderId={OrderId}, NewStatus={NewStatus}, IdempotencyKey={IdempotencyKey}",
+            request.OrderId, request.NewStatus, request.IdempotencyKey ?? "(none)");
+
+        // Idempotency-Key deduplication: return cached response if already processed
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            var existing = await context.IdempotencyRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Key == request.IdempotencyKey, cancellationToken);
+
+            if (existing is not null)
+            {
+                if (existing.ExpiresAtUtc > DateTime.UtcNow)
+                {
+                    logger.LogInformation(
+                        "Idempotency key {IdempotencyKey} already processed, returning cached response",
+                        request.IdempotencyKey);
+                    return JsonSerializer.Deserialize<OrderDto>(existing.ResponsePayload)!;
+                }
+
+                logger.LogInformation(
+                    "Idempotency key {IdempotencyKey} found but expired, reprocessing",
+                    request.IdempotencyKey);
+            }
+        }
+
+        var order = await context.Orders
+            .Include(o => o.Customer)
+            .Include(o => o.LineItems)
+            .FirstOrDefaultAsync(o => o.Id == request.OrderId, cancellationToken);
+
+        if (order is null)
+        {
+            logger.LogWarning("Order not found: OrderId={OrderId}", request.OrderId);
+            throw new KeyNotFoundException($"Order '{request.OrderId}' not found.");
+        }
+
+        // Idempotent: already at requested status
+        if (order.Status == request.NewStatus)
+        {
+            logger.LogInformation(
+                "Order {OrderId} already at status {OrderStatus}, returning current state",
+                request.OrderId, order.Status);
+            return mapper.Map<OrderDto>(order);
+        }
+
+        if (!order.TryTransitionTo(request.NewStatus))
+        {
+            logger.LogWarning(
+                "Invalid status transition: OrderId={OrderId}, {CurrentStatus} -> {NewStatus}. Allowed: {AllowedTransitions}",
+                request.OrderId, order.Status, request.NewStatus,
+                string.Join(", ", order.Status.AllowedTransitions()));
+            throw new InvalidOperationException(
+                $"Cannot transition order from '{order.Status}' to '{request.NewStatus}'. " +
+                $"Allowed transitions: {string.Join(", ", order.Status.AllowedTransitions())}.");
+        }
+
+        var result = mapper.Map<OrderDto>(order);
+
+        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
+        {
+            context.IdempotencyRecords.Add(new IdempotencyRecord
+            {
+                Id = Guid.NewGuid(),
+                Key = request.IdempotencyKey,
+                ResponsePayload = JsonSerializer.Serialize(result),
+                CreatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddDays(7)
+            });
+        }
+
+        await context.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Order status updated: OrderId={OrderId}, Status={OrderStatus}",
+            result.Id, result.Status);
+
+        return result;
     }
 }

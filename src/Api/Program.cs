@@ -70,6 +70,11 @@ try
     builder.Services.AddApplication();
     builder.Services.AddInfrastructure(builder.Configuration);
 
+    // Correlation ID accessor — bridges HttpContext to Application layer
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<SADC.Order.Management.Application.Common.Interfaces.ICorrelationIdAccessor,
+        SADC.Order.Management.Api.Middleware.HttpContextCorrelationIdAccessor>();
+
     // Additional health check — EF Core database connectivity
     builder.Services.AddHealthChecks()
         .AddDbContextCheck<OrderManagementDbContext>("database");

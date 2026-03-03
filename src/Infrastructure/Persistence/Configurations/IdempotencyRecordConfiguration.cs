@@ -25,5 +25,11 @@ public class IdempotencyRecordConfiguration : IEntityTypeConfiguration<Idempoten
 
         builder.Property(r => r.CreatedAtUtc)
             .IsRequired();
+
+        builder.Property(r => r.ExpiresAtUtc)
+            .IsRequired();
+
+        builder.HasIndex(r => r.ExpiresAtUtc)
+            .HasDatabaseName("IX_IdempotencyRecords_ExpiresAtUtc");
     }
 }

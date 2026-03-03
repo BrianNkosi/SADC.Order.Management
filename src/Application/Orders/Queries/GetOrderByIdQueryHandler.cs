@@ -1,16 +1,35 @@
+using AutoMapper;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using SADC.Order.Management.Application.Common.Interfaces;
 using SADC.Order.Management.Application.Orders.DTOs;
 
 namespace SADC.Order.Management.Application.Orders.Queries;
 
-/// <summary>
-/// Handles GetOrderByIdQuery by delegating to IOrderService.
-/// </summary>
-public sealed class GetOrderByIdQueryHandler(IOrderService orderService)
+public sealed class GetOrderByIdQueryHandler(
+    IOrderManagementDbContext context,
+    IMapper mapper,
+    ILogger<GetOrderByIdQueryHandler> logger)
     : IRequestHandler<GetOrderByIdQuery, OrderDto?>
 {
     public async Task<OrderDto?> Handle(GetOrderByIdQuery request, CancellationToken cancellationToken)
     {
-        return await orderService.GetByIdAsync(request.Id, cancellationToken);
+        logger.LogInformation("Retrieving order with Id={OrderId}", request.Id);
+
+        var order = await context.Orders
+            .AsNoTracking()
+            .Include(o => o.Customer)
+            .Include(o => o.LineItems)
+            .FirstOrDefaultAsync(o => o.Id == request.Id, cancellationToken);
+
+        if (order is null)
+        {
+            logger.LogWarning("Order not found with Id={OrderId}", request.Id);
+            return null;
+        }
+
+        logger.LogInformation("Order retrieved: OrderId={OrderId}, Status={OrderStatus}", order.Id, order.Status);
+        return mapper.Map<OrderDto>(order);
     }
 }

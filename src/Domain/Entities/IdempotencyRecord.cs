@@ -23,4 +23,10 @@ public class IdempotencyRecord
     /// When the idempotency record was created (UTC).
     /// </summary>
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// When this record expires and may be cleaned up (UTC).
+    /// Retried requests after expiry are treated as new requests.
+    /// </summary>
+    public DateTime ExpiresAtUtc { get; set; }
 }
