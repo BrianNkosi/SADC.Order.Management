@@ -11,7 +11,7 @@ namespace SADC.Order.Management.Application.Orders.Commands;
 public sealed record UpdateOrderStatusCommand(
     Guid OrderId,
     OrderStatus NewStatus,
-    string? IdempotencyKey = null) : IRequest<OrderDto>, ICorrelatedRequest
+    string? IdempotencyKey = null) : IRequest<OrderDto>, ICorrelatedRequest, IIdempotentCommand
 {
     /// <inheritdoc />
     public string CorrelationId { get; set; } = string.Empty;

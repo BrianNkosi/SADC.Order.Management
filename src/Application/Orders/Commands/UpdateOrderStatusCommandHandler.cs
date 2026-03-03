@@ -1,11 +1,9 @@
-using System.Text.Json;
 using AutoMapper;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SADC.Order.Management.Application.Common.Interfaces;
 using SADC.Order.Management.Application.Orders.DTOs;
-using SADC.Order.Management.Domain.Entities;
 using SADC.Order.Management.Domain.Enums;
 
 namespace SADC.Order.Management.Application.Orders.Commands;
@@ -19,31 +17,8 @@ public sealed class UpdateOrderStatusCommandHandler(
     public async Task<OrderDto> Handle(UpdateOrderStatusCommand request, CancellationToken cancellationToken)
     {
         logger.LogInformation(
-            "Updating order status: OrderId={OrderId}, NewStatus={NewStatus}, IdempotencyKey={IdempotencyKey}",
-            request.OrderId, request.NewStatus, request.IdempotencyKey ?? "(none)");
-
-        // Idempotency-Key deduplication: return cached response if already processed
-        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
-        {
-            var existing = await context.IdempotencyRecords
-                .AsNoTracking()
-                .FirstOrDefaultAsync(r => r.Key == request.IdempotencyKey, cancellationToken);
-
-            if (existing is not null)
-            {
-                if (existing.ExpiresAtUtc > DateTime.UtcNow)
-                {
-                    logger.LogInformation(
-                        "Idempotency key {IdempotencyKey} already processed, returning cached response",
-                        request.IdempotencyKey);
-                    return JsonSerializer.Deserialize<OrderDto>(existing.ResponsePayload)!;
-                }
-
-                logger.LogInformation(
-                    "Idempotency key {IdempotencyKey} found but expired, reprocessing",
-                    request.IdempotencyKey);
-            }
-        }
+            "Updating order status: OrderId={OrderId}, NewStatus={NewStatus}",
+            request.OrderId, request.NewStatus);
 
         var order = await context.Orders
             .Include(o => o.Customer)
@@ -56,7 +31,6 @@ public sealed class UpdateOrderStatusCommandHandler(
             throw new KeyNotFoundException($"Order '{request.OrderId}' not found.");
         }
 
-        // Idempotent: already at requested status
         if (order.Status == request.NewStatus)
         {
             logger.LogInformation(
@@ -76,21 +50,9 @@ public sealed class UpdateOrderStatusCommandHandler(
                 $"Allowed transitions: {string.Join(", ", order.Status.AllowedTransitions())}.");
         }
 
-        var result = mapper.Map<OrderDto>(order);
-
-        if (!string.IsNullOrWhiteSpace(request.IdempotencyKey))
-        {
-            context.IdempotencyRecords.Add(new IdempotencyRecord
-            {
-                Id = Guid.NewGuid(),
-                Key = request.IdempotencyKey,
-                ResponsePayload = JsonSerializer.Serialize(result),
-                CreatedAtUtc = DateTime.UtcNow,
-                ExpiresAtUtc = DateTime.UtcNow.AddDays(7)
-            });
-        }
-
         await context.SaveChangesAsync(cancellationToken);
+
+        var result = mapper.Map<OrderDto>(order);
 
         logger.LogInformation(
             "Order status updated: OrderId={OrderId}, Status={OrderStatus}",

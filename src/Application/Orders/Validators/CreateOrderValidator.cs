@@ -1,10 +1,10 @@
 using FluentValidation;
-using SADC.Order.Management.Application.Orders.DTOs;
+using SADC.Order.Management.Application.Orders.Commands;
 using SADC.Order.Management.Domain.ValueObjects;
 
 namespace SADC.Order.Management.Application.Orders.Validators;
 
-public class CreateOrderValidator : AbstractValidator<CreateOrderRequest>
+public class CreateOrderValidator : AbstractValidator<CreateOrderCommand>
 {
     public CreateOrderValidator()
     {

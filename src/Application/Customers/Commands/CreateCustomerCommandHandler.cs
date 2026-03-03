@@ -1,7 +1,5 @@
 using AutoMapper;
-using FluentValidation;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SADC.Order.Management.Application.Common.Interfaces;
 using SADC.Order.Management.Application.Customers.DTOs;
@@ -12,7 +10,6 @@ namespace SADC.Order.Management.Application.Customers.Commands;
 public sealed class CreateCustomerCommandHandler(
     IOrderManagementDbContext context,
     IMapper mapper,
-    IValidator<CreateCustomerRequest> validator,
     ILogger<CreateCustomerCommandHandler> logger)
     : IRequestHandler<CreateCustomerCommand, CustomerDto>
 {
@@ -21,15 +18,6 @@ public sealed class CreateCustomerCommandHandler(
         logger.LogInformation(
             "Creating customer: Name={CustomerName}, Email={CustomerEmail}, CountryCode={CountryCode}",
             request.Name, request.Email, request.CountryCode);
-
-        var createRequest = new CreateCustomerRequest(request.Name, request.Email, request.CountryCode);
-        var validationResult = await validator.ValidateAsync(createRequest, cancellationToken);
-        if (!validationResult.IsValid)
-        {
-            logger.LogWarning("Customer validation failed: {ValidationErrors}",
-                string.Join("; ", validationResult.Errors.Select(e => $"{e.PropertyName}: {e.ErrorMessage}")));
-            throw new ValidationException(validationResult.Errors);
-        }
 
         var customer = new Customer
         {

@@ -1,10 +1,10 @@
 using FluentValidation;
-using SADC.Order.Management.Application.Customers.DTOs;
+using SADC.Order.Management.Application.Customers.Commands;
 using SADC.Order.Management.Domain.ValueObjects;
 
 namespace SADC.Order.Management.Application.Customers.Validators;
 
-public class CreateCustomerValidator : AbstractValidator<CreateCustomerRequest>
+public class CreateCustomerValidator : AbstractValidator<CreateCustomerCommand>
 {
     public CreateCustomerValidator()
     {

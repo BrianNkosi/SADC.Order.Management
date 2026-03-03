@@ -1,6 +1,5 @@
 using System.Text.Json;
 using AutoMapper;
-using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -16,7 +15,6 @@ namespace SADC.Order.Management.Application.Orders.Commands;
 public sealed class CreateOrderCommandHandler(
     IOrderManagementDbContext context,
     IMapper mapper,
-    IValidator<CreateOrderRequest> validator,
     ICorrelationIdAccessor correlationIdAccessor,
     ILogger<CreateOrderCommandHandler> logger)
     : IRequestHandler<CreateOrderCommand, OrderDto>
@@ -27,19 +25,7 @@ public sealed class CreateOrderCommandHandler(
             "Order creation started: CustomerId={CustomerId}, CurrencyCode={CurrencyCode}, LineItemCount={LineItemCount}",
             request.CustomerId, request.CurrencyCode, request.LineItems.Count);
 
-        // Step 1: Validate
-        var createRequest = new CreateOrderRequest(request.CustomerId, request.CurrencyCode, request.LineItems);
-        var validationResult = await validator.ValidateAsync(createRequest, cancellationToken);
-        if (!validationResult.IsValid)
-        {
-            logger.LogWarning(
-                "Order validation failed for CustomerId={CustomerId}: {ValidationErrors}",
-                request.CustomerId,
-                string.Join("; ", validationResult.Errors.Select(e => $"{e.PropertyName}: {e.ErrorMessage}")));
-            throw new ValidationException(validationResult.Errors);
-        }
-
-        // Step 2: Verify customer exists
+        // Verify customer exists
         var customer = await context.Customers
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == request.CustomerId, cancellationToken);
@@ -49,7 +35,7 @@ public sealed class CreateOrderCommandHandler(
             throw new KeyNotFoundException($"Customer '{request.CustomerId}' not found.");
         }
 
-        // Step 3: Validate country-currency combination
+        // Validate country-currency combination
         var currencyCode = request.CurrencyCode.ToUpperInvariant();
         if (!SadcCountryCurrency.IsValidCurrencyForCountry(customer.CountryCode, currencyCode))
         {
@@ -62,7 +48,7 @@ public sealed class CreateOrderCommandHandler(
                 $"Valid currencies: {string.Join(", ", validCurrencies)}.");
         }
 
-        // Step 4: Build order entity
+        // Build order entity
         var order = new OrderEntity
         {
             Id = Guid.NewGuid(),
@@ -70,6 +56,7 @@ public sealed class CreateOrderCommandHandler(
             Status = OrderStatus.Pending,
             CurrencyCode = currencyCode,
             CreatedAtUtc = DateTime.UtcNow,
+            Customer = customer,
             LineItems = request.LineItems.Select(li => new OrderLineItem
             {
                 Id = Guid.NewGuid(),
@@ -80,7 +67,7 @@ public sealed class CreateOrderCommandHandler(
         };
         order.RecalculateTotal();
 
-        // Step 5: Create outbox message with correlation ID for distributed tracing
+        // Create outbox message with correlation ID for distributed tracing
         var outboxMessage = new OutboxMessage
         {
             Id = Guid.NewGuid(),
@@ -109,23 +96,15 @@ public sealed class CreateOrderCommandHandler(
             Version = 1
         };
 
-        // Step 6: Persist atomically
+        // Persist order + outbox atomically
         context.Orders.Add(order);
         context.OutboxMessages.Add(outboxMessage);
         await context.SaveChangesAsync(cancellationToken);
-
-        // Reload with related data for full mapping
-        var result = await context.Orders
-            .AsNoTracking()
-            .Include(o => o.Customer)
-            .Include(o => o.LineItems)
-            .FirstOrDefaultAsync(o => o.Id == order.Id, cancellationToken)
-            ?? throw new InvalidOperationException("Order was created but could not be retrieved.");
 
         logger.LogInformation(
             "Order created successfully: OrderId={OrderId}, CustomerId={CustomerId}, TotalAmount={TotalAmount}, Status={OrderStatus}",
             order.Id, request.CustomerId, order.TotalAmount, order.Status);
 
-        return mapper.Map<OrderDto>(result);
+        return mapper.Map<OrderDto>(order);
     }
 }
