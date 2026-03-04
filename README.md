@@ -1,6 +1,6 @@
 # SADC Order Management System
 
-A full-stack order management system for SADC (Southern African Development Community) regional trade, built as a Senior Full Stack Developer Technical Assessment.
+A full-stack order management system for SADC (Southern African Development Community) regional trade.
 
 ## Tech Stack
 
@@ -230,7 +230,3 @@ dotnet ef database update <PreviousMigrationName> \
 | `AzureAd__TenantId` | Azure AD tenant ID | `your-tenant-id` |
 | `AzureAd__ClientId` | Azure AD client ID | `your-client-id` |
 | `AzureAd__Audience` | Azure AD audience | `api://sadc-order-management` |
-
-## License
-
-This project is a technical assessment submission.
