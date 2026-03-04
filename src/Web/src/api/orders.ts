@@ -67,13 +67,10 @@ export function useUpdateOrderStatus(orderId: string) {
       return api.put<OrderDto>(`/orders/${orderId}/status`, data, headers);
     },
     onMutate: async (data) => {
-      // Cancel any outgoing refetches so they don't overwrite our optimistic update
       await queryClient.cancelQueries({ queryKey: ['orders', orderId] });
 
-      // Snapshot the previous value
       const previousOrder = queryClient.getQueryData<OrderDto>(['orders', orderId]);
 
-      // Optimistically update the cache
       if (previousOrder) {
         queryClient.setQueryData<OrderDto>(['orders', orderId], {
           ...previousOrder,
@@ -85,13 +82,11 @@ export function useUpdateOrderStatus(orderId: string) {
       return { previousOrder };
     },
     onError: (_err, _data, context) => {
-      // Roll back to the previous value on error
       if (context?.previousOrder) {
         queryClient.setQueryData(['orders', orderId], context.previousOrder);
       }
     },
     onSettled: () => {
-      // Refetch to ensure server state is in sync
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
