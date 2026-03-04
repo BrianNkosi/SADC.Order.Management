@@ -22,41 +22,69 @@ public sealed class CreateOrderCommandHandler(
     public async Task<OrderDto> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
     {
         logger.LogInformation(
-            "Order creation started: CustomerId={CustomerId}, CurrencyCode={CurrencyCode}, LineItemCount={LineItemCount}",
+            "Creating order: CustomerId={CustomerId}, Currency={CurrencyCode}, LineItems={LineItemCount}",
             request.CustomerId, request.CurrencyCode, request.LineItems.Count);
 
-        // Verify customer exists
+        var customer = await FindCustomerAsync(request.CustomerId, cancellationToken);
+        var currencyCode = ValidateCurrency(customer, request.CurrencyCode);
+
+        var order = BuildOrder(request, customer, currencyCode);
+        var outboxMessage = BuildOutboxMessage(order);
+
+        context.Orders.Add(order);
+        context.OutboxMessages.Add(outboxMessage);
+        await context.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Order created: OrderId={OrderId}, TotalAmount={TotalAmount}",
+            order.Id, order.TotalAmount);
+
+        return mapper.Map<OrderDto>(order);
+    }
+
+    private async Task<Customer> FindCustomerAsync(Guid customerId, CancellationToken cancellationToken)
+    {
         var customer = await context.Customers
             .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == request.CustomerId, cancellationToken);
+            .FirstOrDefaultAsync(c => c.Id == customerId, cancellationToken);
+
         if (customer is null)
         {
-            logger.LogWarning("Customer not found: CustomerId={CustomerId}", request.CustomerId);
-            throw new KeyNotFoundException($"Customer '{request.CustomerId}' not found.");
+            logger.LogWarning("Customer not found: CustomerId={CustomerId}", customerId);
+            throw new KeyNotFoundException($"Customer '{customerId}' not found.");
         }
 
-        // Validate country-currency combination
-        var currencyCode = request.CurrencyCode.ToUpperInvariant();
-        if (!SadcCountryCurrency.IsValidCurrencyForCountry(customer.CountryCode, currencyCode))
-        {
-            var validCurrencies = SadcCountryCurrency.GetValidCurrencies(customer.CountryCode);
-            logger.LogWarning(
-                "Invalid currency {CurrencyCode} for country {CountryCode}. Valid: {ValidCurrencies}",
-                currencyCode, customer.CountryCode, string.Join(", ", validCurrencies));
-            throw new InvalidOperationException(
-                $"Currency '{currencyCode}' is not valid for country '{customer.CountryCode}'. " +
-                $"Valid currencies: {string.Join(", ", validCurrencies)}.");
-        }
+        return customer;
+    }
 
-        // Build order entity
+    private string ValidateCurrency(Customer customer, string rawCurrencyCode)
+    {
+        var currencyCode = rawCurrencyCode.ToUpperInvariant();
+
+        if (SadcCountryCurrency.IsValidCurrencyForCountry(customer.CountryCode, currencyCode))
+            return currencyCode;
+
+        var validCurrencies = SadcCountryCurrency.GetValidCurrencies(customer.CountryCode);
+
+        logger.LogWarning(
+            "Invalid currency {CurrencyCode} for country {CountryCode}. Valid: {ValidCurrencies}",
+            currencyCode, customer.CountryCode, string.Join(", ", validCurrencies));
+
+        throw new InvalidOperationException(
+            $"Currency '{currencyCode}' is not valid for country '{customer.CountryCode}'. " +
+            $"Valid currencies: {string.Join(", ", validCurrencies)}.");
+    }
+
+    private static OrderEntity BuildOrder(CreateOrderCommand request, Customer customer, string currencyCode)
+    {
         var order = new OrderEntity
         {
             Id = Guid.NewGuid(),
             CustomerId = request.CustomerId,
+            Customer = customer,
             Status = OrderStatus.Pending,
             CurrencyCode = currencyCode,
             CreatedAtUtc = DateTime.UtcNow,
-            Customer = customer,
             LineItems = request.LineItems.Select(li => new OrderLineItem
             {
                 Id = Guid.NewGuid(),
@@ -65,46 +93,36 @@ public sealed class CreateOrderCommandHandler(
                 UnitPrice = li.UnitPrice
             }).ToList()
         };
+
         order.RecalculateTotal();
-
-        // Create outbox message with correlation ID for distributed tracing
-        var outboxMessage = new OutboxMessage
-        {
-            Id = Guid.NewGuid(),
-            AggregateType = "Order",
-            AggregateId = order.Id,
-            Type = "OrderCreated",
-            Payload = JsonSerializer.Serialize(new
-            {
-                OrderId = order.Id,
-                order.CustomerId,
-                order.CurrencyCode,
-                order.TotalAmount,
-                order.Status,
-                order.CreatedAtUtc,
-                CorrelationId = correlationIdAccessor.CorrelationId,
-                LineItems = order.LineItems.Select(li => new
-                {
-                    li.Id,
-                    li.ProductSku,
-                    li.Quantity,
-                    li.UnitPrice
-                })
-            }),
-            OccurredAtUtc = DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow,
-            Version = 1
-        };
-
-        // Persist order + outbox atomically
-        context.Orders.Add(order);
-        context.OutboxMessages.Add(outboxMessage);
-        await context.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation(
-            "Order created successfully: OrderId={OrderId}, CustomerId={CustomerId}, TotalAmount={TotalAmount}, Status={OrderStatus}",
-            order.Id, request.CustomerId, order.TotalAmount, order.Status);
-
-        return mapper.Map<OrderDto>(order);
+        return order;
     }
+
+    private OutboxMessage BuildOutboxMessage(OrderEntity order) => new()
+    {
+        Id = Guid.NewGuid(),
+        AggregateType = "Order",
+        AggregateId = order.Id,
+        Type = "OrderCreated",
+        OccurredAtUtc = DateTime.UtcNow,
+        CreatedAtUtc = DateTime.UtcNow,
+        Version = 1,
+        Payload = JsonSerializer.Serialize(new
+        {
+            OrderId = order.Id,
+            order.CustomerId,
+            order.CurrencyCode,
+            order.TotalAmount,
+            order.Status,
+            order.CreatedAtUtc,
+            CorrelationId = correlationIdAccessor.CorrelationId,
+            LineItems = order.LineItems.Select(li => new
+            {
+                li.Id,
+                li.ProductSku,
+                li.Quantity,
+                li.UnitPrice
+            })
+        })
+    };
 }

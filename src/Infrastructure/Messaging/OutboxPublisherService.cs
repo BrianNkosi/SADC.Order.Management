@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SADC.Order.Management.Application.Common.Interfaces;
+using SADC.Order.Management.Domain.Entities;
 using SADC.Order.Management.Infrastructure.Persistence;
 
 namespace SADC.Order.Management.Infrastructure.Messaging;
@@ -12,108 +13,104 @@ namespace SADC.Order.Management.Infrastructure.Messaging;
 /// Background service that polls the outbox table and publishes pending messages to RabbitMQ.
 /// Implements retry with exponential backoff.
 /// </summary>
-public class OutboxPublisherService : BackgroundService
+public class OutboxPublisherService(
+    IServiceScopeFactory scopeFactory,
+    IMessagePublisher publisher,
+    ILogger<OutboxPublisherService> logger) : BackgroundService
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IMessagePublisher _publisher;
-    private readonly ILogger<OutboxPublisherService> _logger;
-
     private const string Exchange = "orders";
     private const int PollingIntervalMs = 2000;
     private const int MaxRetries = 5;
     private const int BaseBackoffSeconds = 2;
-
-    public OutboxPublisherService(
-        IServiceScopeFactory scopeFactory,
-        IMessagePublisher publisher,
-        ILogger<OutboxPublisherService> logger)
-    {
-        _scopeFactory = scopeFactory;
-        _publisher = publisher;
-        _logger = logger;
-    }
+    private const int BatchSize = 20;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Outbox publisher started");
+        logger.LogInformation("Outbox publisher started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await ProcessPendingMessagesAsync(stoppingToken);
+                await ProcessBatchAsync(stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Error processing outbox messages");
+                logger.LogError(ex, "Unhandled error in outbox publisher loop");
             }
 
             await Task.Delay(PollingIntervalMs, stoppingToken);
         }
     }
 
-    private async Task ProcessPendingMessagesAsync(CancellationToken cancellationToken)
+    private async Task ProcessBatchAsync(CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
+        using var scope = scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<OrderManagementDbContext>();
 
-        var now = DateTime.UtcNow;
+        var candidates = await FetchCandidatesAsync(context, cancellationToken);
+        if (candidates.Count == 0)
+            return;
 
-        var messages = await context.OutboxMessages
+        var eligible = candidates.Where(IsReadyForProcessing).ToList();
+
+        foreach (var message in eligible)
+            await TryPublishAsync(message, cancellationToken);
+
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private static Task<List<OutboxMessage>> FetchCandidatesAsync(
+        OrderManagementDbContext context, CancellationToken cancellationToken) =>
+        context.OutboxMessages
             .Where(m => m.ProcessedAtUtc == null && m.RetryCount < MaxRetries)
             .OrderBy(m => m.CreatedAtUtc)
-            .Take(20)
+            .Take(BatchSize)
             .ToListAsync(cancellationToken);
 
-        // Apply exponential backoff: skip messages whose backoff period hasn't elapsed
-        var eligibleMessages = messages.Where(m =>
+    private static bool IsReadyForProcessing(OutboxMessage message)
+    {
+        if (message.RetryCount == 0)
+            return true;
+
+        var backoff = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, message.RetryCount - 1));
+        return DateTime.UtcNow >= message.CreatedAtUtc + backoff;
+    }
+
+    private async Task TryPublishAsync(OutboxMessage message, CancellationToken cancellationToken)
+    {
+        try
         {
-            if (m.RetryCount == 0) return true;
-            var backoffDelay = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, m.RetryCount - 1));
-            return now >= m.CreatedAtUtc.Add(backoffDelay * m.RetryCount);
-        }).ToList();
+            await publisher.PublishAsync(
+                Exchange,
+                message.Type.ToLowerInvariant(),
+                new
+                {
+                    message.Id,
+                    message.AggregateType,
+                    message.AggregateId,
+                    message.Type,
+                    message.Payload,
+                    message.Version,
+                    message.OccurredAtUtc,
+                    message.CreatedAtUtc
+                },
+                cancellationToken);
 
-        foreach (var message in eligibleMessages)
-        {
-            try
-            {
-                var routingKey = message.Type.ToLowerInvariant();
+            message.ProcessedAtUtc = DateTime.UtcNow;
+            message.Error = null;
 
-                await _publisher.PublishAsync(
-                    Exchange,
-                    routingKey,
-                    new
-                    {
-                        message.Id,
-                        message.AggregateType,
-                        message.AggregateId,
-                        message.Type,
-                        message.Payload,
-                        message.Version,
-                        message.OccurredAtUtc,
-                        message.CreatedAtUtc
-                    },
-                    cancellationToken);
-
-                message.ProcessedAtUtc = DateTime.UtcNow;
-                message.Error = null;
-
-                _logger.LogInformation("Published outbox message {MessageId} ({Type})", message.Id, message.Type);
-            }
-            catch (Exception ex)
-            {
-                message.RetryCount++;
-                message.Error = ex.Message;
-
-                var nextBackoff = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, message.RetryCount - 1));
-                _logger.LogWarning(ex,
-                    "Failed to publish outbox message {MessageId} (attempt {Attempt}/{MaxRetries}). " +
-                    "Next retry in {BackoffSeconds}s",
-                    message.Id, message.RetryCount, MaxRetries, nextBackoff.TotalSeconds);
-            }
+            logger.LogInformation("Published outbox message {MessageId} ({Type})", message.Id, message.Type);
         }
+        catch (Exception ex)
+        {
+            message.RetryCount++;
+            message.Error = ex.Message;
 
-        if (messages.Count > 0)
-            await context.SaveChangesAsync(cancellationToken);
+            var nextBackoff = TimeSpan.FromSeconds(BaseBackoffSeconds * Math.Pow(2, message.RetryCount - 1));
+            logger.LogWarning(ex,
+                "Failed to publish outbox message {MessageId} (attempt {Attempt}/{MaxRetries}). Next retry in {BackoffSeconds}s",
+                message.Id, message.RetryCount, MaxRetries, nextBackoff.TotalSeconds);
+        }
     }
 }

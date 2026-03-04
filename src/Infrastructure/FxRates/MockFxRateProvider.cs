@@ -14,7 +14,7 @@ public class MockFxRateProvider : IFxRateProvider
 {
     private readonly IMemoryCache _cache;
     private readonly ILogger<MockFxRateProvider> _logger;
-    private readonly TimeSpan _cacheTtl = TimeSpan.FromMinutes(30);
+    private readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Mocked rates relative to ZAR (1 ZAR = X units of currency).
@@ -70,10 +70,6 @@ public class MockFxRateProvider : IFxRateProvider
         if (!RatesToZar.TryGetValue(to, out var toRate))
             throw new ArgumentException($"Unsupported currency: {to}");
 
-        // Convert via ZAR as base:
-        // amount_in_ZAR = amount_in_FROM / fromRate
-        // amount_in_TO = amount_in_ZAR * toRate
-        // So rate = toRate / fromRate
         var rate = toRate / fromRate;
 
         _cache.Set(cacheKey, rate, _cacheTtl);

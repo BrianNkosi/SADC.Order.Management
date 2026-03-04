@@ -15,8 +15,6 @@ public sealed class GetOrderByIdQueryHandler(
 {
     public async Task<OrderDto?> Handle(GetOrderByIdQuery request, CancellationToken cancellationToken)
     {
-        logger.LogInformation("Retrieving order with Id={OrderId}", request.Id);
-
         var order = await context.Orders
             .AsNoTracking()
             .Include(o => o.Customer)

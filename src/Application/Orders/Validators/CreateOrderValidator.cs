@@ -22,9 +22,9 @@ public class CreateOrderValidator : AbstractValidator<CreateOrderCommand>
 
         RuleForEach(x => x.LineItems).ChildRules(li =>
         {
-            li.RuleFor(x => x.ProductSku)
-                .NotEmpty().WithMessage("Product SKU is required.")
-                .MaximumLength(100).WithMessage("Product SKU must not exceed 100 characters.");
+            // li.RuleFor(x => x.ProductSku)
+            //     .NotEmpty().WithMessage("Product SKU is required.")
+            //     .MaximumLength(100).WithMessage("Product SKU must not exceed 100 characters.");
 
             li.RuleFor(x => x.Quantity)
                 .GreaterThan(0).WithMessage("Quantity must be greater than 0.");
